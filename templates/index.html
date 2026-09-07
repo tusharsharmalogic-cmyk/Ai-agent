@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>⚡ AI Agent — Terminal Chat</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <div class="app">
+
+    <header class="topbar">
+      <div class="brand">
+        <span class="logo">⚡</span>
+        <div>
+          <h1>AI Agent</h1>
+          <p class="sub"><span id="status-dot" class="dot"></span> <span id="status-text">connecting…</span> · <span id="model-name"></span></p>
+        </div>
+      </div>
+      <div class="actions">
+        <button id="btn-reset" class="btn ghost" title="Naya chat">⟳ New Chat</button>
+        <button id="btn-key" class="btn ghost" title="API key badlo">🔑 Key</button>
+      </div>
+    </header>
+
+    <main id="chat" class="chat">
+      <div class="welcome" id="welcome">
+        <div class="welcome-card">
+          <h2>⚡ Namaste!</h2>
+          <p>Main ek AI agent hoon jo aapke device par <b>real shell commands</b> chala sakta hoon — bilkul CLI wale agent jaisa.</p>
+          <div class="examples">
+            <button class="example">Disk space check karo</button>
+            <button class="example">System info batao</button>
+            <button class="example">Mera storage kitna bhara hai?</button>
+          </div>
+          <p class="warn">⚠️ Agent real commands run karta hai — destructive commands (rm -rf, sudo…) blacklist me hain.</p>
+        </div>
+      </div>
+    </main>
+
+    <footer class="composer">
+      <div class="composer-box">
+        <textarea id="input" rows="1" placeholder="Message likho… (Enter = send · Shift+Enter = new line)"></textarea>
+        <button id="btn-send" class="btn send" title="Send">➤</button>
+      </div>
+    </footer>
+
+  </div>
+
+  <!-- API key overlay -->
+  <div class="overlay hidden" id="key-overlay">
+    <div class="overlay-card">
+      <h2>🔑 Gemini API Key</h2>
+      <p>Key server par <code>~/.gemini_config.json</code> me save hogi — browser me kabhi nahi jaati.</p>
+      <input type="password" id="key-input" placeholder="AIza…" autocomplete="off">
+      <div class="overlay-actions">
+        <button class="btn ghost" id="key-cancel">Cancel</button>
+        <button class="btn send" id="key-save">Save</button>
+      </div>
+      <p class="overlay-err hidden" id="key-err"></p>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
+  <script src="/static/app.js"></script>
+</body>
+</html>
