@@ -31,7 +31,7 @@ from chat import (
 app = Flask(__name__)
 app.secret_key = os.environ.get("FLASK_SECRET", "ai-agent-web-dev-secret")
 
-MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.7-flash")
+MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.5-flash-lite")
 API_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:streamGenerateContent?alt=sse"
 MAX_HISTORY = 30  # last N messages sent to the API (context trim)
 
@@ -52,7 +52,6 @@ def get_history():
 
 
 def get_api_key():
-    # env var pehle, phir ~/.gemini_config.json (jaisa CLI karta hai)
     return os.environ.get("GEMINI_API_KEY") or load_api_key()
 
 
@@ -61,7 +60,7 @@ def sse(event, data):
 
 
 def gemini_stream(api_key, history):
-    """Gemini SSE ko parse karke ('token', text) / ('error', msg) yield karo."""
+    """Gemini SSE ko parse karke ('token', text) / ('error', msg) / ('retry', msg) yield karo."""
     payload = {
         "system_instruction": {"role": "system", "parts": [{"text": SYSTEM_PROMPT}]},
         "contents": history[-MAX_HISTORY:],
@@ -76,10 +75,21 @@ def gemini_stream(api_key, history):
             timeout=(10, 120),
         )
 
-    response = call()
-    if response.status_code == 503:  # busy -> ek retry (CLI jaisa)
-        time.sleep(5)
+    # 429 aur 503 dono ke liye exponential backoff retry
+    max_retries = 4
+    response = None
+    for attempt in range(max_retries):
         response = call()
+        if response.status_code == 429:
+            wait = 5 * (2 ** attempt)  # 5s, 10s, 20s, 40s
+            yield ("retry", f"Rate limit — {wait}s baad retry ({attempt+1}/{max_retries})...")
+            time.sleep(wait)
+            continue
+        if response.status_code == 503:
+            yield ("retry", f"Server busy — 5s baad retry ({attempt+1}/{max_retries})...")
+            time.sleep(5)
+            continue
+        break
 
     if response.status_code != 200:
         try:
@@ -135,7 +145,6 @@ def reset():
 
 @app.route("/api/history", methods=["GET"])
 def history():
-    # sirf visible turns: system followup messages chhupao
     visible = [
         m for m in get_history()
         if not (m["role"] == "user" and m["parts"][0]["text"].startswith("[System:"))
@@ -157,44 +166,60 @@ def chat():
     history.append({"role": "user", "parts": [{"text": message}]})
 
     def generate():
-        # ── Phase 1: model ka reply stream karo ──
-        yield sse("phase", {"phase": "thinking"})
-        reply = ""
-        for kind, text in gemini_stream(api_key, history):
-            if kind == "error":
-                yield sse("error", {"message": text})
-                return
-            reply += text
-            yield sse("token", {"text": text})
+        MAX_ROUNDS = 9999  # practically unlimited
+        had_any_commands = False
 
-        if not reply.strip():
-            yield sse("error", {"message": "Model ne khali reply bheja"})
-            return
+        for round_num in range(1, MAX_ROUNDS + 1):
 
-        # ── RUN_CMD lines dhundo aur run karo (CLI jaisa) ──
-        yield sse("phase", {"phase": "executing"})
-        cleaned, had_commands, outputs = extract_and_run_commands(reply)
-        history.append({"role": "model", "parts": [{"text": reply}]})
+            # ── AI se reply lo ──
+            if round_num == 1:
+                yield sse("phase", {"phase": "thinking"})
+            else:
+                yield sse("phase", {"phase": "thinking"})
+                yield sse("status", {"message": f"🔄 Step {round_num}: next command soch raha hai..."})
 
-        for cmd, output in outputs.items():
-            yield sse("command", {"cmd": cmd, "output": output})
-
-        if had_commands:
-            # ── Phase 2: outputs wapas deke final answer lo ──
-            followup = build_followup_message(reply, outputs)
-            history.append({"role": "user", "parts": [{"text": followup}]})
-            yield sse("phase", {"phase": "final"})
-            final_reply = ""
+            reply = ""
             for kind, text in gemini_stream(api_key, history):
                 if kind == "error":
                     yield sse("error", {"message": text})
                     return
-                final_reply += text
-                yield sse("token", {"text": text, "final": True})
-            if final_reply.strip():
-                history.append({"role": "model", "parts": [{"text": final_reply}]})
+                elif kind == "retry":
+                    yield sse("status", {"message": "⏳ " + text})
+                    continue
+                reply += text
+                # Round 1 = fresh bubble, baad ke rounds = final bubble me append
+                yield sse("token", {"text": text, "final": round_num > 1})
 
-        yield sse("done", {"had_commands": had_commands})
+            if not reply.strip():
+                yield sse("error", {"message": "Model ne khali reply bheja"})
+                return
+
+            # ── Commands dhundo ──
+            yield sse("phase", {"phase": "executing"})
+            cleaned, had_commands, outputs = extract_and_run_commands(reply)
+            history.append({"role": "model", "parts": [{"text": reply}]})
+
+            if not had_commands:
+                # Koi aur command nahi — chain complete!
+                break
+
+            had_any_commands = True
+
+            # ── Commands ki output dikhao ──
+            for cmd, output in outputs.items():
+                yield sse("command", {"cmd": cmd, "output": output})
+
+            # ── Output AI ko wapas do aur loop chalaao ──
+            yield sse("status", {"message": f"⚡ Step {round_num} done — aagla step shuru..."})
+            time.sleep(3)  # rate limit se bachao
+
+            followup = build_followup_message(reply, outputs)
+            history.append({"role": "user", "parts": [{"text": followup}]})
+
+        else:
+            yield sse("status", {"message": "⚠️ Max steps reach ho gaye (10)"})
+
+        yield sse("done", {"had_commands": had_any_commands})
 
     return Response(
         stream_with_context(generate()),

@@ -155,6 +155,10 @@ async function send() {
         if (ev.event === "phase") {
           setStatus(ev.data.phase);
           if (ev.data.phase === "final") active = addAiMsg();
+        } else if (ev.event === "status") {
+          // retry/wait messages status bar mein dikhao
+          const t = $("status-text");
+          if (t) t.textContent = ev.data.message;
         } else if (ev.event === "token") {
           if (ev.data.final) { finalBuf += ev.data.text; active.set(finalBuf); }
           else { buf += ev.data.text; active.set(buf); }

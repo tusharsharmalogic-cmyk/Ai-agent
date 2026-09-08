@@ -108,8 +108,26 @@ def load_api_key():
             return json.load(f)["api_key"]
     return None
 
+def call_with_retry(call_fn, max_retries=4):
+    """429 aur 503 pe exponential backoff ke saath retry karo."""
+    for attempt in range(max_retries):
+        response = call_fn()
+        if response.status_code == 429:
+            wait = 5 * (2 ** attempt)  # 5s, 10s, 20s, 40s
+            print(f"\n[429 Rate limit] Attempt {attempt+1}/{max_retries} — {wait}s baad retry...")
+            time.sleep(wait)
+            continue
+        if response.status_code == 503:
+            wait = 5
+            print(f"\n[503 Server busy] {wait}s baad retry...")
+            time.sleep(wait)
+            continue
+        return response
+    return response  # last attempt return karo
+
+
 def chat(api_key, history):
-    MODEL = "gemini-3.7-flash"
+    MODEL = "gemini-3.5-flash-lite"
     URL = f"https://generativelanguage.googleapis.com/v1beta/models/{MODEL}:streamGenerateContent?alt=sse"
     PAYLOAD = {
         "system_instruction": {
@@ -119,13 +137,9 @@ def chat(api_key, history):
         "contents": history
     }
 
-    response = requests.post(URL, params={"key": api_key}, json=PAYLOAD, stream=True)
-
-    # 503 pe retry
-    if response.status_code == 503:
-        print("\n[Server busy, 5 sec baad retry kar raha hoon...]")
-        time.sleep(5)
-        response = requests.post(URL, params={"key": api_key}, json=PAYLOAD, stream=True)
+    response = call_with_retry(
+        lambda: requests.post(URL, params={"key": api_key}, json=PAYLOAD, stream=True)
+    )
 
     # HTTP error check
     if response.status_code != 200:
@@ -215,27 +229,32 @@ def main():
             "parts": [{"text": user_input}]
         })
 
-        reply = chat(api_key, history)
-        if not reply:
-            continue
+        # ── Recursive command loop: command → ans → command → ans ... ──
+        MAX_ROUNDS = 9999
+        reply = None
+        for round_num in range(1, MAX_ROUNDS + 1):
+            if round_num == 1:
+                print("Gemini: ", end="", flush=True)
+            else:
+                print(f"\nGemini (step {round_num}): ", end="", flush=True)
 
-        # Commands dhundho aur run karo
-        cleaned_reply, had_commands, outputs = extract_and_run_commands(reply)
+            reply = chat(api_key, history)
+            if not reply:
+                break
 
-        if had_commands:
-            # Original reply history me daalo
+            cleaned_reply, had_commands, outputs = extract_and_run_commands(reply)
             history.append({"role": "model", "parts": [{"text": reply}]})
 
-            # Command outputs AI ko wapas do aur final answer lo
+            if not had_commands:
+                break  # Koi aur command nahi — chain complete!
+
+            # Command output AI ko wapas do
+            print(f"[⏳ Step {round_num} done — next step ke liye 3s wait...]")
+            time.sleep(3)
             followup = build_followup_message(reply, outputs)
             history.append({"role": "user", "parts": [{"text": followup}]})
-
-            print("Gemini (final answer): ", end="", flush=True)
-            final_reply = chat(api_key, history)
-            if final_reply:
-                history.append({"role": "model", "parts": [{"text": final_reply}]})
         else:
-            history.append({"role": "model", "parts": [{"text": reply}]})
+            print("\n[⚠️ Max steps (9999) reach ho gaye]")
 
 if __name__ == "__main__":
     main()
