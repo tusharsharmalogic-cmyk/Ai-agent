@@ -213,6 +213,8 @@ async function saveKey() {
     const j = await res.json().catch(() => ({}));
     if (!res.ok) { errEl.textContent = j.error || "Save fail hua"; errEl.classList.remove("hidden"); return; }
     hideKeyOverlay();
+    // Agar Settings bhi open hai toh refresh karo
+    if (settingsOpen) loadSettingsKeys();
     setStatus("idle");
     input.focus();
   } catch (e) { errEl.textContent = "Network error"; errEl.classList.remove("hidden"); }

@@ -27,6 +27,7 @@ from chat import (
     extract_and_run_commands,
     get_active_index,
     get_all_keys,
+    get_api_key_env,
     load_api_key,
     mask_key,
     remove_key,
@@ -58,7 +59,7 @@ def get_history():
 
 
 def get_api_key():
-    return os.environ.get("GEMINI_API_KEY") or load_api_key()
+    return get_api_key_env() or load_api_key()
 
 
 def sse(event, data):

@@ -206,7 +206,16 @@ def save_api_key(key):
         # Key already exists, usse active banao
         cfg["active_index"] = keys.index(key)
         _save_config(cfg)
-    print("✓ API key saved!")
+    # Verify write
+    if os.path.exists(CONFIG_FILE):
+        print(f"✓ API key saved! ({len(get_all_keys())} keys total) File: {CONFIG_FILE}")
+    else:
+        print(f"✗ Config file NOT created at {CONFIG_FILE}")
+
+
+def get_api_key_env():
+    """GEMINI_API_KEY env var se key lo (fallback)."""
+    return os.environ.get("GEMINI_API_KEY")
 
 
 def load_api_key():
