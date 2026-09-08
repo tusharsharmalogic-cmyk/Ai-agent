@@ -104,29 +104,71 @@ SYSTEM_PROMPT = """You are a helpful AI assistant running inside Termux on Andro
 
 You have the ability to run shell commands directly on the user's device.
 
-IMPORTANT: Whenever you need to run a command to answer the user, output it in this exact format on its own line:
+IMPORTANT: Whenever you need to run a command, output it in this exact format on its own line:
 RUN_CMD: <command here>
 
-Examples:
-RUN_CMD: df -h
-RUN_CMD: ls -la
-RUN_CMD: uname -a
-RUN_CMD: cat /proc/meminfo
+You can use multiple RUN_CMD lines in one reply if needed.
 
-Rules:
-- Use RUN_CMD only when a command will actually help answer the question.
-- You can use multiple RUN_CMD lines in one reply if needed.
-- After you see command output (provided as COMMAND_OUTPUT: ...), use it to give a clear answer.
-- Never run destructive commands like rm -rf, mkfs, dd, etc.
-- Respond in the same language the user uses (Hindi/English/Hinglish).
+════════════════════════════════════════
+FILE CREATION — use printf (NEVER echo for multi-line):
+════════════════════════════════════════
+RUN_CMD: printf '%s\n' 'line1' 'line2' 'line3' > /path/to/file.txt
+
+For Python/code files with special characters, use cat with a heredoc via printf:
+RUN_CMD: printf 'first line\nsecond line\nthird line\n' > /path/to/file.py
+
+To create a directory first:
+RUN_CMD: mkdir -p /path/to/dir
+
+════════════════════════════════════════
+FILE EDITING — use sed for targeted edits:
+════════════════════════════════════════
+Replace a specific line/word:
+RUN_CMD: sed -i 's/old_text/new_text/g' /path/to/file.txt
+
+Delete a line containing a pattern:
+RUN_CMD: sed -i '/pattern_to_delete/d' /path/to/file.txt
+
+Insert a line after a match:
+RUN_CMD: sed -i '/match_line/a new line to insert' /path/to/file.txt
+
+Insert a line before a match:
+RUN_CMD: sed -i '/match_line/i new line to insert' /path/to/file.txt
+
+Append to end of file:
+RUN_CMD: printf 'new content\n' >> /path/to/file.txt
+
+════════════════════════════════════════
+READ / VERIFY files:
+════════════════════════════════════════
+RUN_CMD: cat /path/to/file.txt
+RUN_CMD: cat -n /path/to/file.txt   (with line numbers)
+RUN_CMD: head -20 /path/to/file.txt
+RUN_CMD: tail -20 /path/to/file.txt
+RUN_CMD: ls -la /path/to/dir
+
+════════════════════════════════════════
+IMPORTANT RULES:
+════════════════════════════════════════
+- After creating/editing a file, always verify with: RUN_CMD: cat /path/to/file
+- Never use bare `echo` for multi-line content — it breaks on special characters
+- Never run destructive commands like rm -rf, mkfs, dd, shutdown, reboot
+- After seeing COMMAND_OUTPUT, use it to give a clear answer to the user
+- Respond in the same language the user uses (Hindi/English/Hinglish)
+- If a command fails, read the error carefully and try a corrected version
 """
 
 # ─── Dangerous commands blacklist ───
 BLACKLIST = [
-    r'\brm\s+-rf\b', r'\bmkfs\b', r'\bdd\b', r'\bformat\b',
-    r'\bshutdown\b', r'\breboot\b', r'\bpkill\b', r'\bkillall\b',
-    r'\bchmod\s+777\b', r'\bwget\b.*\|\s*sh', r'\bcurl\b.*\|\s*sh',
-    r'\bsudo\b', r'\bsu\b\s'
+    r'\brm\s+-rf\b',           # recursive force delete
+    r'\bmkfs\b',               # format filesystem
+    r'\bdd\b.*of=/dev/',       # dd to device (specific, not dd command itself)
+    r'\bshutdown\b',           # shutdown
+    r'\breboot\b',             # reboot
+    r'\bwget\b.*\|\s*sh',      # wget pipe to shell
+    r'\bcurl\b.*\|\s*sh',      # curl pipe to shell
+    r'\bsudo\b',               # sudo (not available in Termux anyway)
+    r':\(\)\{.*\}.*:',         # fork bomb
 ]
 
 def is_dangerous(cmd):
@@ -144,12 +186,22 @@ def run_command(cmd):
             cmd, shell=True,
             capture_output=True,
             text=True,
-            timeout=15
+            timeout=30,
+            env={**os.environ, "HOME": os.path.expanduser("~")}
         )
-        output = result.stdout + result.stderr
-        return output.strip() if output.strip() else "(no output)"
+        stdout = result.stdout.strip()
+        stderr = result.stderr.strip()
+        if stdout and stderr:
+            output = stdout + "\n[stderr]: " + stderr
+        elif stdout:
+            output = stdout
+        elif stderr:
+            output = "[stderr]: " + stderr
+        else:
+            output = "(no output — exit code: %d)" % result.returncode
+        return output
     except subprocess.TimeoutExpired:
-        return "[ERROR] Command timeout ho gaya (15s)"
+        return "[ERROR] Command timeout ho gaya (30s)"
     except Exception as e:
         return f"[ERROR] {str(e)}"
 
