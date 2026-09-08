@@ -625,6 +625,7 @@ textarea#input::placeholder { color: var(--text-muted); }
   font-size: 13px;
 }
 .key-empty span { font-size: 24px; }
+.key-empty.hidden { display: none; }
 
 .model-info {
   font-family: var(--mono);
