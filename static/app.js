@@ -331,6 +331,8 @@ async function addSettingsKey() {
       return;
     }
     input.value = "";
+    // Agar "key required" overlay open tha (configured nahi tha), toh ab hide karo
+    hideKeyOverlay();
     loadSettingsKeys();
   } catch (e) {
     errEl.textContent = "Network error";
@@ -397,7 +399,6 @@ chat.addEventListener("click", (e) => {
 });
 
 $("btn-reset").addEventListener("click", resetChat);
-$("btn-key").addEventListener("click", () => showKeyOverlay(false));
 $("key-cancel").addEventListener("click", hideKeyOverlay);
 $("key-save").addEventListener("click", saveKey);
 $("key-input").addEventListener("keydown", (e) => { if (e.key === "Enter") saveKey(); });
