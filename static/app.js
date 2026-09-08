@@ -1,4 +1,3 @@
-/* ─── AI Agent Web — frontend logic ─── */
 const $ = (id) => document.getElementById(id);
 const chat = $("chat");
 const input = $("input");
@@ -7,60 +6,52 @@ const btnSend = $("btn-send");
 let streaming = false;
 let welcomeHTML = "";
 
-// ─── utils ────────────────────────────────────────────────────────────────
+// ─── Utils ────────────────────────────────────────────────────────────────
 const esc = (s) =>
-  String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
 
 function md(text) {
-  // RUN_CMD lines ko ⚡ chips bana do
   text = text.replace(/^RUN_CMD:\s*(.+)$/gm, "⚡ **Running:** `$1`");
   if (window.marked) {
-    try {
-      return marked.parse(text, { breaks: true, gfm: true });
-    } catch (e) { /* fallback below */ }
+    try { return marked.parse(text, { breaks: true, gfm: true }); } catch (e) {}
   }
   return esc(text).replace(/\n/g, "<br>");
 }
 
-function scrollDown() {
-  chat.scrollTop = chat.scrollHeight;
-}
+function scrollDown() { chat.scrollTop = chat.scrollHeight; }
 
 function setStatus(phase) {
   const dot = $("status-dot");
   const t = $("status-text");
-  dot.className = "dot";
-  if (phase === "thinking") { dot.classList.add("amber"); t.textContent = "Gemini soch raha hai…"; }
-  else if (phase === "executing") { dot.classList.add("orange"); t.textContent = "Commands run ho rahe hain…"; }
-  else if (phase === "final") { dot.classList.add("amber"); t.textContent = "Final answer likh raha hai…"; }
-  else if (phase === "error") { dot.classList.add("red"); t.textContent = "Error"; }
-  else { t.textContent = "ready"; }
+  dot.className = "status-dot";
+  if (phase === "thinking")  { dot.classList.add("busy"); t.textContent = "Soch raha hai…"; }
+  else if (phase === "executing") { dot.classList.add("busy"); t.textContent = "Running…"; }
+  else if (phase === "final")  { dot.classList.add("busy"); t.textContent = "Writing…"; }
+  else if (phase === "error")  { dot.classList.add("err");  t.textContent = "Error"; }
+  else { t.textContent = "Ready"; }
 }
 
-// ─── message elements ─────────────────────────────────────────────────────
+// ─── Message elements ─────────────────────────────────────────────────────
 function addUserMsg(text) {
   const el = document.createElement("div");
   el.className = "msg user";
-  const b = document.createElement("div");
-  b.className = "bubble user-bubble";
-  b.textContent = text;
-  el.appendChild(b);
+  el.innerHTML = `<div class="msg-avatar">U</div><div class="bubble">${esc(text)}</div>`;
   chat.appendChild(el);
   scrollDown();
 }
 
 function addAiMsg() {
-  const wrap = document.createElement("div");
-  wrap.className = "msg ai";
+  const el = document.createElement("div");
+  el.className = "msg ai";
   const bubble = document.createElement("div");
-  bubble.className = "bubble ai-bubble";
+  bubble.className = "bubble";
   bubble.innerHTML = '<span class="cursor"></span>';
-  wrap.appendChild(bubble);
-  chat.appendChild(wrap);
+  el.innerHTML = `<div class="msg-avatar">✦</div>`;
+  el.appendChild(bubble);
+  chat.appendChild(el);
   scrollDown();
 
-  let text = "";
-  let finished = false;
+  let text = "", finished = false;
   return {
     set(t) {
       text = t;
@@ -69,7 +60,7 @@ function addAiMsg() {
     },
     done() {
       finished = true;
-      bubble.innerHTML = md(text) || "<i>(khali reply)</i>";
+      bubble.innerHTML = md(text) || "<i style='color:var(--text-muted)'>…</i>";
       scrollDown();
     },
   };
@@ -79,8 +70,8 @@ function addCmdCard(cmd, output) {
   const el = document.createElement("div");
   el.className = "cmd-card";
   el.innerHTML =
-    '<div class="cmd-head"><span>⚡</span> <code>' + esc(cmd) + "</code></div>" +
-    '<pre class="cmd-out">' + esc(output) + "</pre>";
+    `<div class="cmd-head"><span>⚡</span> <code>${esc(cmd)}</code></div>` +
+    `<pre class="cmd-out">${esc(output)}</pre>`;
   chat.appendChild(el);
   scrollDown();
 }
@@ -88,15 +79,14 @@ function addCmdCard(cmd, output) {
 function addErrorMsg(t) {
   const el = document.createElement("div");
   el.className = "msg err";
-  el.textContent = "⚠️ " + t;
+  el.textContent = t;
   chat.appendChild(el);
   scrollDown();
 }
 
 // ─── SSE parsing ──────────────────────────────────────────────────────────
 function parseSse(raw) {
-  let event = "message";
-  let data = "";
+  let event = "message", data = "";
   for (const line of raw.split("\n")) {
     if (line.startsWith("event:")) event = line.slice(6).trim();
     else if (line.startsWith("data:")) data += line.slice(5).trim();
@@ -105,7 +95,7 @@ function parseSse(raw) {
   try { return { event, data: JSON.parse(data) }; } catch (e) { return null; }
 }
 
-// ─── send / stream ────────────────────────────────────────────────────────
+// ─── Send ─────────────────────────────────────────────────────────────────
 async function send() {
   const text = input.value.trim();
   if (!text || streaming) return;
@@ -156,7 +146,6 @@ async function send() {
           setStatus(ev.data.phase);
           if (ev.data.phase === "final") active = addAiMsg();
         } else if (ev.event === "status") {
-          // retry/wait messages status bar mein dikhao
           const t = $("status-text");
           if (t) t.textContent = ev.data.message;
         } else if (ev.event === "token") {
@@ -184,7 +173,7 @@ async function send() {
   }
 }
 
-// ─── restore previous chat (page reload) ──────────────────────────────────
+// ─── Restore history ──────────────────────────────────────────────────────
 async function restore() {
   try {
     const res = await fetch("/api/history");
@@ -195,18 +184,13 @@ async function restore() {
     if (w) w.remove();
     for (const m of messages) {
       const text = m.parts.map((p) => p.text).join("");
-      if (m.role === "user") {
-        addUserMsg(text);
-      } else {
-        const b = addAiMsg();
-        b.set(text);
-        b.done();
-      }
+      if (m.role === "user") addUserMsg(text);
+      else { const b = addAiMsg(); b.set(text); b.done(); }
     }
-  } catch (e) { /* ignore */ }
+  } catch (e) {}
 }
 
-// ─── API key overlay ──────────────────────────────────────────────────────
+// ─── Key overlay ──────────────────────────────────────────────────────────
 function showKeyOverlay(required) {
   $("key-overlay").classList.remove("hidden");
   $("key-cancel").style.display = required ? "none" : "";
@@ -214,19 +198,12 @@ function showKeyOverlay(required) {
   $("key-input").value = "";
   setTimeout(() => $("key-input").focus(), 50);
 }
-
-function hideKeyOverlay() {
-  $("key-overlay").classList.add("hidden");
-}
+function hideKeyOverlay() { $("key-overlay").classList.add("hidden"); }
 
 async function saveKey() {
   const key = $("key-input").value.trim();
   const errEl = $("key-err");
-  if (!key) {
-    errEl.textContent = "Key likhna zaroori hai";
-    errEl.classList.remove("hidden");
-    return;
-  }
+  if (!key) { errEl.textContent = "Key likhna zaroori hai"; errEl.classList.remove("hidden"); return; }
   try {
     const res = await fetch("/api/key", {
       method: "POST",
@@ -234,21 +211,14 @@ async function saveKey() {
       body: JSON.stringify({ key }),
     });
     const j = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      errEl.textContent = j.error || "Save fail hua";
-      errEl.classList.remove("hidden");
-      return;
-    }
+    if (!res.ok) { errEl.textContent = j.error || "Save fail hua"; errEl.classList.remove("hidden"); return; }
     hideKeyOverlay();
     setStatus("idle");
     input.focus();
-  } catch (e) {
-    errEl.textContent = "Network error";
-    errEl.classList.remove("hidden");
-  }
+  } catch (e) { errEl.textContent = "Network error"; errEl.classList.remove("hidden"); }
 }
 
-// ─── reset ────────────────────────────────────────────────────────────────
+// ─── Reset ────────────────────────────────────────────────────────────────
 async function resetChat() {
   if (streaming) return;
   try { await fetch("/api/reset", { method: "POST" }); } catch (e) {}
@@ -257,47 +227,46 @@ async function resetChat() {
   input.focus();
 }
 
-// ─── composer ─────────────────────────────────────────────────────────────
+// ─── Textarea auto-grow ───────────────────────────────────────────────────
 function autoGrow() {
   input.style.height = "auto";
-  input.style.height = Math.min(input.scrollHeight, 160) + "px";
+  input.style.height = Math.min(input.scrollHeight, 180) + "px";
 }
 
-// ─── wire up ──────────────────────────────────────────────────────────────
+// ─── Wire up ──────────────────────────────────────────────────────────────
 btnSend.addEventListener("click", send);
+
+// Enter = new line, Send button = send (no Shift+Enter needed)
 input.addEventListener("keydown", (e) => {
-  if (e.key === "Enter" && !e.shiftKey) {
-    e.preventDefault();
-    send();
-  }
+  // Enter without any modifier = new line (default textarea behavior)
+  // No special handling — just autoGrow
 });
+
 input.addEventListener("input", autoGrow);
 
-// example buttons (delegation — reset ke baad bhi kaam kare)
+// Example buttons
 chat.addEventListener("click", (e) => {
   const btn = e.target.closest(".example");
   if (!btn) return;
   input.value = btn.textContent;
   autoGrow();
-  input.focus();
+  send();
 });
 
 $("btn-reset").addEventListener("click", resetChat);
 $("btn-key").addEventListener("click", () => showKeyOverlay(false));
 $("key-cancel").addEventListener("click", hideKeyOverlay);
 $("key-save").addEventListener("click", saveKey);
-$("key-input").addEventListener("keydown", (e) => {
-  if (e.key === "Enter") saveKey();
-});
+$("key-input").addEventListener("keydown", (e) => { if (e.key === "Enter") saveKey(); });
 
-// ─── init ─────────────────────────────────────────────────────────────────
+// ─── Init ─────────────────────────────────────────────────────────────────
 (async function init() {
   welcomeHTML = $("welcome").outerHTML;
   try {
     const info = await (await fetch("/api/info")).json();
-    $("model-name").textContent = info.model;
+    $("model-name").textContent = info.model ? "· " + info.model : "";
     if (!info.configured) showKeyOverlay(true);
-  } catch (e) { /* ignore */ }
+  } catch (e) {}
   await restore();
   setStatus("idle");
   input.focus();

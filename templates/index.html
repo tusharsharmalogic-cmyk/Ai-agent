@@ -2,8 +2,8 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>⚡ AI Agent — Terminal Chat</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>AI Agent</title>
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
@@ -11,51 +11,57 @@
 
     <header class="topbar">
       <div class="brand">
-        <span class="logo">⚡</span>
-        <div>
-          <h1>AI Agent</h1>
-          <p class="sub"><span id="status-dot" class="dot"></span> <span id="status-text">connecting…</span> · <span id="model-name"></span></p>
+        <div class="logo-icon">✦</div>
+        <div class="brand-info">
+          <div class="brand-name">AI Agent</div>
+          <div class="brand-status">
+            <span class="status-dot" id="status-dot"></span>
+            <span id="status-text">Ready</span>
+            <span id="model-name"></span>
+          </div>
         </div>
       </div>
       <div class="actions">
-        <button id="btn-reset" class="btn ghost" title="Naya chat">⟳ New Chat</button>
-        <button id="btn-key" class="btn ghost" title="API key badlo">🔑 Key</button>
+        <button class="btn-icon" id="btn-key" title="API Key">🔑</button>
+        <button class="btn-icon" id="btn-reset" title="New Chat">✎</button>
       </div>
     </header>
 
     <main id="chat" class="chat">
       <div class="welcome" id="welcome">
-        <div class="welcome-card">
-          <h2>⚡ Namaste!</h2>
-          <p>Main ek AI agent hoon jo aapke device par <b>real shell commands</b> chala sakta hoon — bilkul CLI wale agent jaisa.</p>
-          <div class="examples">
-            <button class="example">Disk space check karo</button>
-            <button class="example">System info batao</button>
-            <button class="example">Mera storage kitna bhara hai?</button>
-          </div>
-          <p class="warn">⚠️ Agent real commands run karta hai — destructive commands (rm -rf, sudo…) blacklist me hain.</p>
+        <div class="welcome-icon">✦</div>
+        <div>
+          <h2>AI Agent</h2>
+          <p>Real shell commands run kar sakta hoon aapke device par.</p>
+        </div>
+        <div class="example-grid">
+          <button class="example">Disk space check karo</button>
+          <button class="example">System info batao</button>
+          <button class="example">Storage kitna bhara hai?</button>
+          <button class="example">Running processes dikhao</button>
         </div>
       </div>
     </main>
 
     <footer class="composer">
-      <div class="composer-box">
-        <textarea id="input" rows="1" placeholder="Message likho… (Enter = send · Shift+Enter = new line)"></textarea>
-        <button id="btn-send" class="btn send" title="Send">➤</button>
+      <div class="composer-wrap">
+        <textarea id="input" rows="1" placeholder="Message…"></textarea>
+        <button id="btn-send" class="btn-send" title="Send">↑</button>
       </div>
+      <div class="composer-hint">Enter = new line &nbsp;·&nbsp; Send button = bhejo</div>
     </footer>
 
   </div>
 
-  <!-- API key overlay -->
+  <!-- API Key Overlay -->
   <div class="overlay hidden" id="key-overlay">
     <div class="overlay-card">
       <h2>🔑 Gemini API Key</h2>
-      <p>Key server par <code>~/.gemini_config.json</code> me save hogi — browser me kabhi nahi jaati.</p>
+      <p>Key server par <code>~/.gemini_config.json</code> me save hogi.</p>
       <input type="password" id="key-input" placeholder="AIza…" autocomplete="off">
       <div class="overlay-actions">
-        <button class="btn ghost" id="key-cancel">Cancel</button>
-        <button class="btn send" id="key-save">Save</button>
+        <button class="btn-ghost" id="key-cancel">Cancel</button>
+        <button class="btn-primary" id="key-save">Save</button>
       </div>
       <p class="overlay-err hidden" id="key-err"></p>
     </div>
