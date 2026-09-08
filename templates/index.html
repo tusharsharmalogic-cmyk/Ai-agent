@@ -11,6 +11,7 @@
 
     <header class="topbar">
       <div class="brand">
+        <button class="btn-icon sidebar-toggle" id="btn-sidebar" title="Chat History">☰</button>
         <div class="logo-icon">✦</div>
         <div class="brand-info">
           <div class="brand-name">AI Agent</div>
@@ -27,7 +28,28 @@
       </div>
     </header>
 
-    <main id="chat" class="chat">
+    <div class="body">
+      <div class="sidebar-backdrop" id="sidebar-backdrop"></div>
+      <aside class="sidebar" id="sidebar">
+        <div class="sidebar-head">
+          <div class="sidebar-title">Chat History</div>
+          <button class="btn-new-chat" id="btn-new-chat">+ New Chat</button>
+          <div class="search-wrap">
+            <span class="search-icon">🔍</span>
+            <input type="search" id="chat-search" placeholder="Search chats..." autocomplete="off">
+          </div>
+        </div>
+        <div class="chat-list" id="chat-list">
+          <!-- Chats dynamically yahan aayenge -->
+        </div>
+        <div class="chat-list-empty hidden" id="chat-list-empty">
+          <span>💬</span>
+          <p>Abhi koi chat nahi hai.
+            Pehla message bhejo, chat apne aap save ho jayegi.</p>
+        </div>
+      </aside>
+
+      <main id="chat" class="chat">
       <div class="welcome" id="welcome">
         <div class="welcome-icon">✦</div>
         <div>
@@ -42,6 +64,7 @@
         </div>
       </div>
     </main>
+    </div>
 
     <footer class="composer">
       <div class="composer-wrap">

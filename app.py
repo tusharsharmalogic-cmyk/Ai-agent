@@ -20,6 +20,7 @@ from flask import (
     stream_with_context,
 )
 
+import save_chat
 from chat import (
     SYSTEM_PROMPT,
     add_key,
@@ -45,6 +46,9 @@ MAX_HISTORY = 30  # last N messages sent to the API (context trim)
 # browser session id -> chat history (in-memory)
 SESSIONS = {}
 
+# current chat id per browser session (chat history persistence)
+CHAT_IDS = {}
+
 
 # ─── Helpers ──────────────────────────────────────────────────────────────
 
@@ -56,6 +60,11 @@ def get_sid():
 
 def get_history():
     return SESSIONS.setdefault(get_sid(), [])
+
+
+def get_chat_id():
+    """Is browser session ka current chat id (DB-backed)."""
+    return CHAT_IDS.get(get_sid())
 
 
 def get_api_key():
@@ -200,6 +209,7 @@ def keys_switch():
 @app.route("/api/reset", methods=["POST"])
 def reset():
     SESSIONS.pop(get_sid(), None)
+    CHAT_IDS.pop(get_sid(), None)
     return jsonify(ok=True)
 
 
@@ -210,6 +220,83 @@ def history():
         if not (m["role"] == "user" and m["parts"][0]["text"].startswith("[System:"))
     ]
     return jsonify(messages=visible)
+
+
+# ─── Chat History (SQLite persistence) ────────────────────────────────────
+
+@app.route("/api/chats/new", methods=["POST"])
+def chats_new():
+    """Naya empty chat banao aur usse current session ka chat bana do."""
+    SESSIONS.pop(get_sid(), None)
+    chat_id = save_chat.create_chat()
+    CHAT_IDS[get_sid()] = chat_id
+    return jsonify(chat_id=chat_id, chat=save_chat.get_chat(chat_id))
+
+
+@app.route("/api/chats")
+def chats_list():
+    """Saare chats grouped by date (Today/Yesterday/Older), search support."""
+    search = (request.args.get("q") or "").strip() or None
+    return jsonify(groups=save_chat.list_chats(search))
+
+
+@app.route("/api/chats/<chat_id>")
+def chats_get(chat_id):
+    """Chat metadata + saare messages (old chat continue karne ke liye)."""
+    meta = save_chat.get_chat(chat_id)
+    if not meta:
+        return jsonify(error="Chat nahi mila"), 404
+    return jsonify(chat=meta, messages=save_chat.get_messages(chat_id))
+
+
+@app.route("/api/chats/<chat_id>/open", methods=["POST"])
+def chats_open(chat_id):
+    """Purane chat ko current session me load karo (context ke saath)."""
+    meta = save_chat.get_chat(chat_id)
+    if not meta:
+        return jsonify(error="Chat nahi mila"), 404
+
+    history = []
+    for m in save_chat.get_messages(chat_id):
+        history.append({"role": m["role"], "parts": [{"text": m["content"]}]})
+    SESSIONS[get_sid()] = history
+    CHAT_IDS[get_sid()] = chat_id
+    return jsonify(chat=meta, messages=save_chat.get_messages(chat_id))
+
+
+@app.route("/api/chats/<chat_id>/rename", methods=["POST"])
+def chats_rename(chat_id):
+    data = request.get_json(silent=True) or {}
+    title = (data.get("title") or "").strip()
+    if not title:
+        return jsonify(error="Title required"), 400
+    if len(title) > 120:
+        title = title[:120]
+    ok = save_chat.rename_chat(chat_id, title)
+    if not ok:
+        return jsonify(error="Chat nahi mila"), 404
+    return jsonify(ok=True, title=title)
+
+
+@app.route("/api/chats/<chat_id>/pin", methods=["POST"])
+def chats_pin(chat_id):
+    data = request.get_json(silent=True) or {}
+    ok = save_chat.set_pinned(chat_id, bool(data.get("pinned", True)))
+    if not ok:
+        return jsonify(error="Chat nahi mila"), 404
+    return jsonify(ok=True, pinned=bool(data.get("pinned", True)))
+
+
+@app.route("/api/chats/<chat_id>/delete", methods=["POST"])
+def chats_delete(chat_id):
+    ok = save_chat.delete_chat(chat_id)
+    if not ok:
+        return jsonify(error="Chat nahi mila"), 404
+    # Agar current chat delete hua to session reset
+    if get_chat_id() == chat_id:
+        SESSIONS.pop(get_sid(), None)
+        CHAT_IDS.pop(get_sid(), None)
+    return jsonify(ok=True)
 
 
 @app.route("/api/chat", methods=["POST"])
@@ -225,9 +312,22 @@ def chat():
     history = get_history()
     history.append({"role": "user", "parts": [{"text": message}]})
 
+    # ── Chat History persistence ──
+    # Current chat nahi hai to naya banao (pehla message = auto title).
+    chat_id = get_chat_id()
+    if not chat_id:
+        chat_id = save_chat.create_chat(title=save_chat.auto_title(message))
+        CHAT_IDS[get_sid()] = chat_id
+    else:
+        # Chat auto-title: 'New Chat' default title ho to pehle real message se set karo
+        save_chat.set_title_if_new(chat_id, save_chat.auto_title(message))
+    save_chat.add_message(chat_id, "user", message)
+
     def generate():
         MAX_ROUNDS = 9999  # practically unlimited
         had_any_commands = False
+
+        yield sse("chat_id", {"chat_id": chat_id})
 
         for round_num in range(1, MAX_ROUNDS + 1):
 
@@ -258,6 +358,7 @@ def chat():
             yield sse("phase", {"phase": "executing"})
             cleaned, had_commands, outputs = extract_and_run_commands(reply)
             history.append({"role": "model", "parts": [{"text": reply}]})
+            save_chat.add_message(chat_id, "model", reply)
 
             if not had_commands:
                 # Koi aur command nahi — chain complete!
@@ -275,11 +376,14 @@ def chat():
 
             followup = build_followup_message(reply, outputs)
             history.append({"role": "user", "parts": [{"text": followup}]})
+            # Followup context bhi save karo taaki chat continue karte waqt
+            # AI ko command outputs ka pura context mile.
+            save_chat.add_message(chat_id, "user", followup)
 
         else:
             yield sse("status", {"message": "⚠️ Max steps reach ho gaye (10)"})
 
-        yield sse("done", {"had_commands": had_any_commands})
+        yield sse("done", {"had_commands": had_any_commands, "chat_id": chat_id})
 
     return Response(
         stream_with_context(generate()),

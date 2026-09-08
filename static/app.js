@@ -6,6 +6,10 @@ const btnSend = $("btn-send");
 let streaming = false;
 let welcomeHTML = "";
 
+// ─── Chat History state ─────────────────────────────────────────────────
+let currentChatId = null;
+let chatsLoaded = false;
+
 // ─── Utils ────────────────────────────────────────────────────────────────
 const esc = (s) =>
   String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
@@ -116,7 +120,7 @@ async function send() {
     const res = await fetch("/api/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ message: text }),
+      body: JSON.stringify({ message: text, chat_id: currentChatId }),
     });
 
     if (!res.ok || !res.body) {
@@ -148,6 +152,10 @@ async function send() {
         } else if (ev.event === "status") {
           const t = $("status-text");
           if (t) t.textContent = ev.data.message;
+        } else if (ev.event === "chat_id") {
+          // Backend ne naya chat bana (auto-title) — sidebar refresh
+          currentChatId = ev.data.chat_id;
+          loadChatList($("chat-search").value.trim());
         } else if (ev.event === "token") {
           if (ev.data.final) { finalBuf += ev.data.text; active.set(finalBuf); }
           else { buf += ev.data.text; active.set(buf); }
@@ -158,6 +166,8 @@ async function send() {
           addErrorMsg(ev.data.message);
         } else if (ev.event === "done") {
           active.done();
+          // Sidebar list refresh (ordering / last activity update)
+          loadChatList($("chat-search").value.trim());
         }
       }
     }
@@ -187,7 +197,225 @@ async function restore() {
       if (m.role === "user") addUserMsg(text);
       else { const b = addAiMsg(); b.set(text); b.done(); }
     }
+    if (messages.length) loadChatList();
   } catch (e) {}
+}
+
+// ─── Chat History (SQLite persistence) ───────────────────────────────────
+async function loadChatList(search = "") {
+  const listEl = $("chat-list");
+  const emptyEl = $("chat-list-empty");
+  try {
+    const url = "/api/chats" + (search ? "?q=" + encodeURIComponent(search) : "");
+    const { groups } = await (await fetch(url)).json();
+    listEl.innerHTML = "";
+
+    let total = 0;
+    const order = ["Pinned", "Today", "Yesterday", "Older"];
+    for (const groupName of order) {
+      const chats = groups[groupName] || [];
+      if (!chats.length) continue;
+      total += chats.length;
+
+      const label = document.createElement("div");
+      label.className = "chat-group-label";
+      label.textContent = groupName;
+      listEl.appendChild(label);
+
+      for (const c of chats) {
+        listEl.appendChild(renderChatItem(c));
+      }
+    }
+
+    emptyEl.classList.toggle("hidden", total > 0);
+  } catch (e) {}
+}
+
+function renderChatItem(c) {
+  const item = document.createElement("div");
+  item.className = "chat-item" + (c.id === currentChatId ? " active" : "") + (c.pinned ? " pinned" : "");
+  item.dataset.chatId = c.id;
+
+  const icon = document.createElement("span");
+  icon.className = "chat-item-icon";
+  icon.textContent = c.pinned ? "📌" : "💬";
+
+  const body = document.createElement("div");
+  body.className = "chat-item-body";
+
+  const title = document.createElement("div");
+  title.className = "chat-item-title";
+  title.textContent = c.title || "New Chat";
+
+  const time = document.createElement("div");
+  time.className = "chat-item-time";
+  time.textContent = timeAgo(c.updated_at) + " · " + (c.message_count || 0) + " msgs";
+
+  const menuBtn = document.createElement("button");
+  menuBtn.className = "chat-menu-btn";
+  menuBtn.title = "Options";
+  menuBtn.textContent = "⋮";
+  menuBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    showChatMenu(e, c);
+  });
+
+  body.appendChild(title);
+  body.appendChild(time);
+  item.appendChild(icon);
+  item.appendChild(body);
+  item.appendChild(menuBtn);
+
+  item.addEventListener("click", () => openChat(c.id));
+  return item;
+}
+
+function timeAgo(iso) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  const diff = Date.now() - d.getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return mins + "m ago";
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return hrs + "h ago";
+  const days = Math.floor(hrs / 24);
+  if (days < 7) return days + "d ago";
+  return d.toLocaleDateString();
+}
+
+async function openChat(chatId) {
+  if (streaming) return;
+  try {
+    const res = await fetch(`/api/chats/${chatId}/open`, { method: "POST" });
+    if (!res.ok) return;
+    const { chat, messages } = await res.json();
+    currentChatId = chatId;
+    closeSidebar();
+
+    chat.innerHTML = "";
+
+    for (const m of messages) {
+      // [System: ...] followups internal hain — UI me mat dikhao
+      if (m.role === "user" && m.content.startsWith("[System:")) continue;
+      if (m.role === "user") addUserMsg(m.content);
+      else { const b = addAiMsg(); b.set(m.content); b.done(); }
+    }
+
+    markActiveChatItem();
+    setStatus("idle");
+    input.focus();
+  } catch (e) {}
+}
+
+function markActiveChatItem() {
+  document.querySelectorAll(".chat-item").forEach((el) => {
+    el.classList.toggle("active", el.dataset.chatId === currentChatId);
+  });
+}
+
+async function newChat() {
+  if (streaming) return;
+  try {
+    const res = await fetch("/api/chats/new", { method: "POST" });
+    if (!res.ok) return;
+    const { chat_id } = await res.json();
+    currentChatId = chat_id;
+  } catch (e) {}
+  chat.innerHTML = welcomeHTML;
+  setStatus("idle");
+  input.focus();
+  closeSidebar();
+  loadChatList();
+}
+
+function showChatMenu(e, c) {
+  closeChatMenu();
+  const menu = document.createElement("div");
+  menu.className = "ctx-menu";
+  menu.id = "chat-ctx-menu";
+
+  const mk = (label, icon, fn, danger) => {
+    const b = document.createElement("button");
+    b.className = "ctx-item" + (danger ? " danger" : "");
+    b.textContent = icon + "  " + label;
+    b.addEventListener("click", () => { closeChatMenu(); fn(); });
+    return b;
+  };
+
+  menu.appendChild(mk("Rename", "✏️", () => renameChat(c)));
+  menu.appendChild(mk(c.pinned ? "Unpin" : "Pin", "📌", () => togglePin(c)));
+  menu.appendChild(mk("Delete", "🗑️", () => deleteChat(c), true));
+
+  document.body.appendChild(menu);
+
+  const r = e.currentTarget.getBoundingClientRect();
+  const mw = menu.offsetWidth || 160;
+  const mh = menu.offsetHeight || 120;
+  let x = Math.min(r.left, window.innerWidth - mw - 8);
+  let y = r.bottom + 4;
+  if (y + mh > window.innerHeight - 8) y = r.top - mh - 4;
+  menu.style.left = Math.max(8, x) + "px";
+  menu.style.top = Math.max(8, y) + "px";
+
+  e.currentTarget.closest(".chat-item")?.classList.add("menu-open");
+  setTimeout(() => {
+    document.addEventListener("click", closeChatMenu, { once: true });
+    window.addEventListener("resize", closeChatMenu, { once: true });
+  }, 0);
+}
+
+function closeChatMenu() {
+  $("chat-ctx-menu")?.remove();
+  document.querySelectorAll(".chat-item.menu-open").forEach((el) => el.classList.remove("menu-open"));
+}
+
+async function renameChat(c) {
+  const t = prompt("Naya title:", c.title || "");
+  if (t === null) return;
+  const title = t.trim();
+  if (!title) return;
+  try {
+    await fetch(`/api/chats/${c.id}/rename`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title }),
+    });
+    loadChatList($("chat-search").value.trim());
+  } catch (e) {}
+}
+
+async function togglePin(c) {
+  try {
+    await fetch(`/api/chats/${c.id}/pin`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ pinned: !c.pinned }),
+    });
+    loadChatList($("chat-search").value.trim());
+  } catch (e) {}
+}
+
+async function deleteChat(c) {
+  if (!confirm("Ye chat aur uske saare messages delete ho jayenge. Confirm?")) return;
+  try {
+    await fetch(`/api/chats/${c.id}/delete`, { method: "POST" });
+    if (c.id === currentChatId) {
+      currentChatId = null;
+      chat.innerHTML = welcomeHTML;
+    }
+    loadChatList($("chat-search").value.trim());
+  } catch (e) {}
+}
+
+// Sidebar open/close (mobile drawer)
+function openSidebar() {
+  $("sidebar").classList.add("open");
+  $("sidebar-backdrop")?.classList.add("show");
+}
+function closeSidebar() {
+  $("sidebar").classList.remove("open");
+  $("sidebar-backdrop")?.classList.remove("show");
 }
 
 // ─── Key overlay (quick-add) ────────────────────────────────────────────
@@ -369,9 +597,7 @@ async function deleteKey(index) {
 async function resetChat() {
   if (streaming) return;
   try { await fetch("/api/reset", { method: "POST" }); } catch (e) {}
-  chat.innerHTML = welcomeHTML;
-  setStatus("idle");
-  input.focus();
+  await newChat();
 }
 
 // ─── Textarea auto-grow ───────────────────────────────────────────────────
@@ -401,6 +627,21 @@ chat.addEventListener("click", (e) => {
 });
 
 $("btn-reset").addEventListener("click", resetChat);
+
+// Chat History wiring
+$("btn-new-chat").addEventListener("click", newChat);
+$("btn-sidebar").addEventListener("click", openSidebar);
+
+let searchTimer = null;
+$("chat-search").addEventListener("input", () => {
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(() => loadChatList($("chat-search").value.trim()), 200);
+});
+
+// Search input me Enter dabao to blur (mobile keyboard band)
+$("chat-search").addEventListener("keydown", (e) => { if (e.key === "Enter") e.target.blur(); });
+
+$("sidebar-backdrop").addEventListener("click", closeSidebar);
 $("key-cancel").addEventListener("click", hideKeyOverlay);
 $("key-save").addEventListener("click", saveKey);
 $("key-input").addEventListener("keydown", (e) => { if (e.key === "Enter") saveKey(); });
