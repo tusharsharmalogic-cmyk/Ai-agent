@@ -7,6 +7,98 @@ import time
 
 CONFIG_FILE = os.path.expanduser("~/.gemini_config.json")
 
+# ─── Multi-key storage helpers ───
+def _load_config():
+    """Config file se full data load karo."""
+    if os.path.exists(CONFIG_FILE):
+        with open(CONFIG_FILE) as f:
+            data = json.load(f)
+            # Migration: purana single-key format se naye format me
+            if "api_key" in data and "keys" not in data:
+                data = {
+                    "keys": [data["api_key"]] if data["api_key"] else [],
+                    "active_index": 0,
+                }
+                _save_config(data)
+            return data
+    return {"keys": [], "active_index": 0}
+
+
+def _save_config(data):
+    """Config data ko file me save karo."""
+    with open(CONFIG_FILE, "w") as f:
+        json.dump(data, f, indent=2)
+
+
+def get_all_keys():
+    """Saari keys list me return karo."""
+    return _load_config().get("keys", [])
+
+
+def get_active_index():
+    """Active key index return karo."""
+    cfg = _load_config()
+    keys = cfg.get("keys", [])
+    idx = cfg.get("active_index", 0)
+    if not keys:
+        return -1
+    if idx < 0 or idx >= len(keys):
+        return 0
+    return idx
+
+
+def add_key(new_key):
+    """Nayi key add karo. Pehli key ho to usse active banao."""
+    cfg = _load_config()
+    keys = cfg.get("keys", [])
+    if new_key in keys:
+        return False, "Ye key pehle se hai"
+    keys.append(new_key)
+    if len(keys) == 1:
+        cfg["active_index"] = 0
+    cfg["keys"] = keys
+    _save_config(cfg)
+    return True, f"Key #{len(keys)} save ho gayi"
+
+
+def remove_key(index):
+    """Index par key delete karo."""
+    cfg = _load_config()
+    keys = cfg.get("keys", [])
+    if index < 0 or index >= len(keys):
+        return False, "Galat index"
+    keys.pop(index)
+    cfg["keys"] = keys
+    # Active index adjust karo
+    active = cfg.get("active_index", 0)
+    if not keys:
+        cfg["active_index"] = 0
+    elif active >= len(keys):
+        cfg["active_index"] = len(keys) - 1
+    elif active > index:
+        cfg["active_index"] = active - 1
+    _save_config(cfg)
+    return True, f"Key #{index + 1} delete ho gayi"
+
+
+def switch_key(index):
+    """Active key index change karo."""
+    cfg = _load_config()
+    keys = cfg.get("keys", [])
+    if index < 0 or index >= len(keys):
+        return False, "Galat index"
+    cfg["active_index"] = index
+    _save_config(cfg)
+    return True, f"Key #{index + 1} active ho gayi"
+
+
+def mask_key(key):
+    """Key ko masked form me convert karo (e.g. AIza...xyz)."""
+    if len(key) <= 8:
+        return key[:3] + "***"
+    return key[:5] + "..." + key[-4:]
+
+
 # ─── System prompt — AI ko batata hai commands kaise dene hain ───
 SYSTEM_PROMPT = """You are a helpful AI assistant running inside Termux on Android.
 
@@ -98,14 +190,31 @@ def build_followup_message(original_reply, outputs):
     return f"[System: Commands run ho gaye. Outputs:\n\n{outputs_text}\n\nAb user ko clear answer do.]"
 
 def save_api_key(key):
-    with open(CONFIG_FILE, "w") as f:
-        json.dump({"api_key": key}, f)
+    """Legacy single-key save — naye multi-key format me convert karo."""
+    cfg = _load_config()
+    keys = cfg.get("keys", [])
+    if not keys:
+        cfg["keys"] = [key]
+        cfg["active_index"] = 0
+        _save_config(cfg)
+    elif key not in keys:
+        keys.append(key)
+        cfg["keys"] = keys
+        cfg["active_index"] = len(keys) - 1
+        _save_config(cfg)
+    else:
+        # Key already exists, usse active banao
+        cfg["active_index"] = keys.index(key)
+        _save_config(cfg)
     print("✓ API key saved!")
 
+
 def load_api_key():
-    if os.path.exists(CONFIG_FILE):
-        with open(CONFIG_FILE) as f:
-            return json.load(f)["api_key"]
+    """Active API key return karo."""
+    keys = get_all_keys()
+    idx = get_active_index()
+    if idx >= 0 and idx < len(keys):
+        return keys[idx]
     return None
 
 def call_with_retry(call_fn, max_retries=4):

@@ -190,7 +190,7 @@ async function restore() {
   } catch (e) {}
 }
 
-// ─── Key overlay ──────────────────────────────────────────────────────────
+// ─── Key overlay (quick-add) ────────────────────────────────────────────
 function showKeyOverlay(required) {
   $("key-overlay").classList.remove("hidden");
   $("key-cancel").style.display = required ? "none" : "";
@@ -216,6 +216,149 @@ async function saveKey() {
     setStatus("idle");
     input.focus();
   } catch (e) { errEl.textContent = "Network error"; errEl.classList.remove("hidden"); }
+}
+
+// ─── Settings overlay ───────────────────────────────────────────────────
+let settingsOpen = false;
+
+function showSettings() {
+  if (settingsOpen) return;
+  settingsOpen = true;
+  $("settings-overlay").classList.remove("hidden");
+  loadSettingsKeys();
+}
+function hideSettings() {
+  settingsOpen = false;
+  $("settings-overlay").classList.add("hidden");
+}
+
+async function loadSettingsKeys() {
+  const listEl = $("settings-key-list");
+  const emptyEl = $("settings-key-empty");
+  const errEl = $("settings-key-err");
+  errEl.classList.add("hidden");
+  listEl.innerHTML = "";
+
+  try {
+    const res = await fetch("/api/keys");
+    const data = await res.json();
+
+    // Model info
+    try {
+      const info = await (await fetch("/api/info")).json();
+      $("settings-model").textContent = info.model || "—";
+    } catch (e) {}
+
+    if (!data.keys || data.keys.length === 0) {
+      emptyEl.classList.remove("hidden");
+      return;
+    }
+    emptyEl.classList.add("hidden");
+
+    data.keys.forEach((k) => {
+      const item = document.createElement("div");
+      item.className = "key-item" + (k.active ? " active" : "");
+
+      // Number badge
+      const numBadge = document.createElement("span");
+      numBadge.className = "key-badge num-badge";
+      numBadge.textContent = "#" + (k.index + 1);
+
+      // Masked label
+      const label = document.createElement("span");
+      label.className = "key-label";
+      label.textContent = k.masked;
+
+      const actions = document.createElement("div");
+      actions.className = "key-actions";
+
+      if (k.active) {
+        const activeBadge = document.createElement("span");
+        activeBadge.className = "key-badge active-badge";
+        activeBadge.textContent = "Active";
+        actions.appendChild(activeBadge);
+      } else {
+        // Switch button
+        const switchBtn = document.createElement("button");
+        switchBtn.className = "key-btn switch-btn";
+        switchBtn.title = "Is key ko active karo";
+        switchBtn.textContent = "⚡";
+        switchBtn.addEventListener("click", () => switchToKey(k.index));
+        actions.appendChild(switchBtn);
+      }
+
+      // Delete button
+      const delBtn = document.createElement("button");
+      delBtn.className = "key-btn delete-btn";
+      delBtn.title = "Key delete karo";
+      delBtn.textContent = "✕";
+      delBtn.addEventListener("click", () => deleteKey(k.index));
+      actions.appendChild(delBtn);
+
+      item.appendChild(numBadge);
+      item.appendChild(label);
+      item.appendChild(actions);
+      listEl.appendChild(item);
+    });
+  } catch (e) {
+    emptyEl.classList.add("hidden");
+    listEl.innerHTML = '<div style="color:var(--text-muted);font-size:13px;padding:12px;">Load fail ho gaya</div>';
+  }
+}
+
+async function addSettingsKey() {
+  const input = $("settings-key-input");
+  const errEl = $("settings-key-err");
+  const key = input.value.trim();
+  errEl.classList.add("hidden");
+
+  if (!key) {
+    errEl.textContent = "Pehle API key daalo";
+    errEl.classList.remove("hidden");
+    return;
+  }
+
+  try {
+    const res = await fetch("/api/keys/add", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ key }),
+    });
+    const j = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      errEl.textContent = j.error || "Add fail hua";
+      errEl.classList.remove("hidden");
+      return;
+    }
+    input.value = "";
+    loadSettingsKeys();
+  } catch (e) {
+    errEl.textContent = "Network error";
+    errEl.classList.remove("hidden");
+  }
+}
+
+async function switchToKey(index) {
+  try {
+    await fetch("/api/keys/switch", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ index }),
+    });
+    loadSettingsKeys();
+  } catch (e) {}
+}
+
+async function deleteKey(index) {
+  if (!confirm("Ye key delete ho jayegi. Confirm karo?")) return;
+  try {
+    await fetch("/api/keys/remove", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ index }),
+    });
+    loadSettingsKeys();
+  } catch (e) {}
 }
 
 // ─── Reset ────────────────────────────────────────────────────────────────
@@ -258,6 +401,16 @@ $("btn-key").addEventListener("click", () => showKeyOverlay(false));
 $("key-cancel").addEventListener("click", hideKeyOverlay);
 $("key-save").addEventListener("click", saveKey);
 $("key-input").addEventListener("keydown", (e) => { if (e.key === "Enter") saveKey(); });
+
+// Settings
+$("btn-settings").addEventListener("click", showSettings);
+$("settings-close").addEventListener("click", hideSettings);
+$("settings-key-add").addEventListener("click", addSettingsKey);
+$("settings-key-input").addEventListener("keydown", (e) => { if (e.key === "Enter") addSettingsKey(); });
+// Click outside modal to close
+$("settings-overlay").addEventListener("click", (e) => {
+  if (e.target === $("settings-overlay")) hideSettings();
+});
 
 // ─── Init ─────────────────────────────────────────────────────────────────
 (async function init() {

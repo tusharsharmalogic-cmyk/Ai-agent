@@ -22,10 +22,16 @@ from flask import (
 
 from chat import (
     SYSTEM_PROMPT,
+    add_key,
     build_followup_message,
     extract_and_run_commands,
+    get_active_index,
+    get_all_keys,
     load_api_key,
+    mask_key,
+    remove_key,
     save_api_key,
+    switch_key,
 )
 
 app = Flask(__name__)
@@ -124,17 +130,70 @@ def index():
 
 @app.route("/api/info")
 def info():
-    return jsonify(model=MODEL, configured=bool(get_api_key()))
+    keys = get_all_keys()
+    return jsonify(model=MODEL, configured=bool(keys), key_count=len(keys))
 
 
 @app.route("/api/key", methods=["POST"])
 def key_save():
+    """Legacy single-key endpoint — naye multi-key format me save karo."""
     data = request.get_json(silent=True) or {}
     key = (data.get("key") or "").strip()
     if not key:
         return jsonify(error="API key required"), 400
     save_api_key(key)
     return jsonify(configured=True)
+
+
+# ─── Multi-Key Management ───────────────────────────────────────────────
+
+@app.route("/api/keys")
+def keys_list():
+    """Saari keys list karo (masked) + active index."""
+    keys = get_all_keys()
+    active = get_active_index()
+    masked = [{"index": i, "masked": mask_key(k), "active": i == active}
+              for i, k in enumerate(keys)]
+    return jsonify(keys=masked, active_index=active)
+
+
+@app.route("/api/keys/add", methods=["POST"])
+def keys_add():
+    """Nayi key add karo."""
+    data = request.get_json(silent=True) or {}
+    key = (data.get("key") or "").strip()
+    if not key:
+        return jsonify(error="API key required"), 400
+    ok, msg = add_key(key)
+    if not ok:
+        return jsonify(error=msg), 409
+    return jsonify(ok=True, message=msg)
+
+
+@app.route("/api/keys/remove", methods=["POST"])
+def keys_remove():
+    """Key delete karo by index."""
+    data = request.get_json(silent=True) or {}
+    index = data.get("index")
+    if index is None or not isinstance(index, int):
+        return jsonify(error="index required"), 400
+    ok, msg = remove_key(index)
+    if not ok:
+        return jsonify(error=msg), 400
+    return jsonify(ok=True, message=msg)
+
+
+@app.route("/api/keys/switch", methods=["POST"])
+def keys_switch():
+    """Active key change karo."""
+    data = request.get_json(silent=True) or {}
+    index = data.get("index")
+    if index is None or not isinstance(index, int):
+        return jsonify(error="index required"), 400
+    ok, msg = switch_key(index)
+    if not ok:
+        return jsonify(error=msg), 400
+    return jsonify(ok=True, message=msg)
 
 
 @app.route("/api/reset", methods=["POST"])

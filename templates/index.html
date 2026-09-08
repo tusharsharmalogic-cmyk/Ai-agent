@@ -23,6 +23,7 @@
       </div>
       <div class="actions">
         <button class="btn-icon" id="btn-key" title="API Key">🔑</button>
+        <button class="btn-icon" id="btn-settings" title="Settings">⚙</button>
         <button class="btn-icon" id="btn-reset" title="New Chat">✎</button>
       </div>
     </header>
@@ -64,6 +65,41 @@
         <button class="btn-primary" id="key-save">Save</button>
       </div>
       <p class="overlay-err hidden" id="key-err"></p>
+    </div>
+  </div>
+
+  <!-- Settings Overlay -->
+  <div class="overlay hidden" id="settings-overlay">
+    <div class="overlay-card settings-card">
+      <div class="settings-header">
+        <h2>⚙ Settings</h2>
+        <button class="btn-icon" id="settings-close" title="Close">✕</button>
+      </div>
+
+      <div class="settings-section">
+        <h3>🔑 API Keys</h3>
+        <p class="settings-desc">Multiple Gemini API keys add karke switch karo. Jab ek key rate-limit ho jaye to doosri use ho sakti hai.</p>
+
+        <div class="key-add-row">
+          <input type="password" id="settings-key-input" placeholder="Nayi API key daalo (AIza…)" autocomplete="off">
+          <button class="btn-primary" id="settings-key-add">+ Add</button>
+        </div>
+        <p class="overlay-err hidden" id="settings-key-err"></p>
+
+        <div class="key-list" id="settings-key-list">
+          <!-- Keys dynamically yahan aayengi -->
+        </div>
+
+        <div class="key-empty hidden" id="settings-key-empty">
+          <span>📭</span>
+          <p>Abhi koi key nahi hai. Upar daal ke add karo.</p>
+        </div>
+      </div>
+
+      <div class="settings-section">
+        <h3>🤖 Model</h3>
+        <div class="model-info" id="settings-model">—</div>
+      </div>
     </div>
   </div>
 
