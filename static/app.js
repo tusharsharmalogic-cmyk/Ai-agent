@@ -462,6 +462,48 @@ function hideSettings() {
   $("settings-overlay").classList.add("hidden");
 }
 
+// ─── Model selection ─────────────────────────────────────────────────
+async function loadModelSelect() {
+  const sel = $("model-select");
+  try {
+    const { active, models } = await (await fetch("/api/model")).json();
+    sel.innerHTML = "";
+    for (const m of models) {
+      const opt = document.createElement("option");
+      opt.value = m;
+      opt.textContent = m;
+      if (m === active) opt.selected = true;
+      sel.appendChild(opt);
+    }
+    $("settings-model").textContent = "Active: " + active;
+  } catch (e) {
+    $("settings-model").textContent = "Model load fail hua";
+  }
+}
+
+async function saveModel() {
+  const sel = $("model-select");
+  const infoEl = $("settings-model");
+  const model = sel.value;
+  try {
+    const res = await fetch("/api/model/set", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model }),
+    });
+    const j = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      infoEl.textContent = j.error || "Model set fail hua";
+      return;
+    }
+    infoEl.textContent = "Active: " + model;
+    // Topbar model label bhi update karo
+    $("model-name").textContent = model ? "· " + model : "";
+  } catch (e) {
+    infoEl.textContent = "Network error";
+  }
+}
+
 async function loadSettingsKeys() {
   const listEl = $("settings-key-list");
   const emptyEl = $("settings-key-empty");
@@ -473,11 +515,8 @@ async function loadSettingsKeys() {
     const res = await fetch("/api/keys");
     const data = await res.json();
 
-    // Model info
-    try {
-      const info = await (await fetch("/api/info")).json();
-      $("settings-model").textContent = info.model || "—";
-    } catch (e) {}
+    // Model dropdown + info
+    loadModelSelect();
 
     if (!data.keys || data.keys.length === 0) {
       emptyEl.classList.remove("hidden");
@@ -651,6 +690,7 @@ $("btn-settings").addEventListener("click", showSettings);
 $("settings-close").addEventListener("click", hideSettings);
 $("settings-key-add").addEventListener("click", addSettingsKey);
 $("settings-key-input").addEventListener("keydown", (e) => { if (e.key === "Enter") addSettingsKey(); });
+$("model-select").addEventListener("change", saveModel);
 // Click outside modal to close
 $("settings-overlay").addEventListener("click", (e) => {
   if (e.target === $("settings-overlay")) hideSettings();
@@ -664,6 +704,7 @@ $("settings-overlay").addEventListener("click", (e) => {
     $("model-name").textContent = info.model ? "· " + info.model : "";
     if (!info.configured) showKeyOverlay(true);
   } catch (e) {}
+  loadModelSelect();
   await restore();
   setStatus("idle");
   input.focus();

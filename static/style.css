@@ -839,6 +839,48 @@ textarea#input::placeholder { color: var(--text-muted); }
 .key-empty span { font-size: 24px; }
 .key-empty.hidden { display: none; }
 
+.model-select-wrap {
+  position: relative;
+  margin-bottom: 10px;
+}
+
+.model-select-wrap::after {
+  content: "▾";
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--text-muted);
+  pointer-events: none;
+  font-size: 13px;
+}
+
+.model-select {
+  width: 100%;
+  appearance: none;
+  -webkit-appearance: none;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 10px 32px 10px 12px;
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 13px;
+  outline: none;
+  cursor: pointer;
+  transition: border-color .15s;
+}
+.model-select:focus { border-color: var(--text-muted); }
+.model-select:hover { border-color: var(--text-muted); }
+
+.model-select option {
+  background: var(--surface);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 13px;
+  padding: 8px;
+}
+
 .model-info {
   font-family: var(--mono);
   font-size: 13px;

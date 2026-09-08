@@ -7,6 +7,22 @@ import time
 
 CONFIG_FILE = os.path.expanduser("~/.gemini_config.json")
 
+# ─── Available Gemini models ───
+AVAILABLE_MODELS = [
+    "gemini-3.8-flash",
+    "gemini-3.7-flash",
+    "gemini-3.6-flash",
+    "gemini-3.5-flash",
+    "gemini-3.5-flash-lite",
+    "gemini-3.1-flash-lite",
+    "gemini-3.1-pro-preview",
+    "gemini-3-flash-preview",
+    "gemini-2.5-pro",
+    "gemini-2.5-flash",
+    "gemini-2.5-flash-lite",
+]
+DEFAULT_MODEL = "gemini-3.5-flash-lite"
+
 # ─── Multi-key storage helpers ───
 def _load_config():
     """Config file se full data load karo."""
@@ -97,6 +113,26 @@ def mask_key(key):
     if len(key) <= 8:
         return key[:3] + "***"
     return key[:5] + "..." + key[-4:]
+
+
+# ─── Model selection helpers ───
+def get_active_model():
+    """Config me saved active model return karo (default fallback ke saath)."""
+    cfg = _load_config()
+    model = cfg.get("model")
+    if model in AVAILABLE_MODELS:
+        return model
+    return DEFAULT_MODEL
+
+
+def set_model(model):
+    """Active model set karo. Returns (ok, message)."""
+    if model not in AVAILABLE_MODELS:
+        return False, "Ye model available nahi hai"
+    cfg = _load_config()
+    cfg["model"] = model
+    _save_config(cfg)
+    return True, f"Model set: {model}"
 
 
 # ─── System prompt — AI ko batata hai commands kaise dene hain ───
@@ -297,7 +333,7 @@ def call_with_retry(call_fn, max_retries=4):
 
 
 def chat(api_key, history):
-    MODEL = "gemini-3.5-flash-lite"
+    MODEL = get_active_model()
     URL = f"https://generativelanguage.googleapis.com/v1beta/models/{MODEL}:streamGenerateContent?alt=sse"
     PAYLOAD = {
         "system_instruction": {

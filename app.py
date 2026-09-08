@@ -22,24 +22,28 @@ from flask import (
 
 import save_chat
 from chat import (
+    AVAILABLE_MODELS,
+    DEFAULT_MODEL,
     SYSTEM_PROMPT,
     add_key,
     build_followup_message,
     extract_and_run_commands,
     get_active_index,
+    get_active_model,
     get_all_keys,
     get_api_key_env,
     load_api_key,
     mask_key,
     remove_key,
     save_api_key,
+    set_model,
     switch_key,
 )
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("FLASK_SECRET", "ai-agent-web-dev-secret")
 
-MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.5-flash-lite")
+MODEL = os.environ.get("GEMINI_MODEL", DEFAULT_MODEL)
 API_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:streamGenerateContent?alt=sse"
 MAX_HISTORY = 30  # last N messages sent to the API (context trim)
 
@@ -71,12 +75,18 @@ def get_api_key():
     return get_api_key_env() or load_api_key()
 
 
+def get_current_model():
+    """Active model: env var override > config me saved model > default."""
+    return os.environ.get("GEMINI_MODEL") or get_active_model()
+
+
 def sse(event, data):
     return "event: %s\ndata: %s\n\n" % (event, json.dumps(data))
 
 
 def gemini_stream(api_key, history):
     """Gemini SSE ko parse karke ('token', text) / ('error', msg) / ('retry', msg) yield karo."""
+    model = get_current_model()
     payload = {
         "system_instruction": {"role": "system", "parts": [{"text": SYSTEM_PROMPT}]},
         "contents": history[-MAX_HISTORY:],
@@ -84,7 +94,7 @@ def gemini_stream(api_key, history):
 
     def call():
         return requests.post(
-            API_URL.format(model=MODEL),
+            API_URL.format(model=model),
             params={"key": api_key},
             json=payload,
             stream=True,
@@ -141,7 +151,7 @@ def index():
 @app.route("/api/info")
 def info():
     keys = get_all_keys()
-    return jsonify(model=MODEL, configured=bool(keys), key_count=len(keys))
+    return jsonify(model=get_current_model(), configured=bool(keys), key_count=len(keys))
 
 
 @app.route("/api/key", methods=["POST"])
@@ -204,6 +214,25 @@ def keys_switch():
     if not ok:
         return jsonify(error=msg), 400
     return jsonify(ok=True, message=msg)
+
+
+# ─── Model Selection ──────────────────────────────────────────────────
+
+@app.route("/api/model")
+def model_get():
+    """Active model + saare available models return karo."""
+    return jsonify(active=get_current_model(), models=AVAILABLE_MODELS)
+
+
+@app.route("/api/model/set", methods=["POST"])
+def model_set():
+    """Active model change karo."""
+    data = request.get_json(silent=True) or {}
+    model = (data.get("model") or "").strip()
+    ok, msg = set_model(model)
+    if not ok:
+        return jsonify(error=msg), 400
+    return jsonify(ok=True, model=model, message=msg)
 
 
 @app.route("/api/reset", methods=["POST"])
