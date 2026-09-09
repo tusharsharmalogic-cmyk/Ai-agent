@@ -190,6 +190,7 @@ async function restore() {
     if (!res.ok) return;
     const { messages } = await res.json();
     if (!messages || !messages.length) return;
+ if (currentChatId !== null) return;
     const w = $("welcome");
     if (w) w.remove();
     for (const m of messages) {
