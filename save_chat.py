@@ -1,132 +1,178 @@
 """
-save_chat.py — SQLite persistence layer for Chat History.
+save_chat.py — JSON file persistence layer for Chat History.
 
-DB: data/chats.db (auto-created on first import).
-Tables: chats (id, title, created_at, updated_at, pinned)
-        messages (id, chat_id, role, content, timestamp)
+Storage: data/chats/<chat_id>.json (har chat ka alag JSON file)
+Index: data/index.json (saare chats ki metadata + pinned status)
 
-Sab queries parameterized hain — kabhi string concatenation nahi.
+Har chat file ka format:
+{
+    "id": "...",
+    "title": "...",
+    "created_at": "...",
+    "updated_at": "...",
+    "pinned": false,
+    "messages": [
+        {"role": "user", "content": "...", "timestamp": "..."},
+        {"role": "model", "content": "...", "timestamp": "..."}
+    ]
+}
 """
+import json
 import os
-import sqlite3
 import threading
+import uuid
+from datetime import datetime, timedelta
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(BASE_DIR, "data")
-DB_PATH = os.path.join(DATA_DIR, "chats.db")
+CHATS_DIR = os.path.join(DATA_DIR, "chats")
+INDEX_FILE = os.path.join(DATA_DIR, "index.json")
 
-# Flask threaded=True mode me chalta hai — har request ke liye naya
-# connection + check_same_thread=False with a lock is safest for SQLite.
-_LOCK = threading.Lock()
-
-
-def _connect():
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
-    conn.execute("PRAGMA foreign_keys = ON")
-    conn.row_factory = sqlite3.Row
-    return conn
+# Thread-safe file operations ke liye lock
+_LOCK = threading.RLock()  # Re-entrant lock — nested with blocks support
 
 
-def _init_db():
-    os.makedirs(DATA_DIR, exist_ok=True)
-    conn = _connect()
-    try:
-        conn.executescript(
-            """
-            CREATE TABLE IF NOT EXISTS chats (
-                id          TEXT PRIMARY KEY,
-                title       TEXT NOT NULL DEFAULT 'New Chat',
-                created_at  TEXT NOT NULL,
-                updated_at  TEXT NOT NULL,
-                pinned      INTEGER NOT NULL DEFAULT 0
-            );
-
-            CREATE TABLE IF NOT EXISTS messages (
-                id         INTEGER PRIMARY KEY AUTOINCREMENT,
-                chat_id    TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
-                role       TEXT NOT NULL CHECK (role IN ('user', 'model')),
-                content    TEXT NOT NULL,
-                timestamp  TEXT NOT NULL
-            );
-
-            CREATE INDEX IF NOT EXISTS idx_messages_chat_id ON messages(chat_id);
-            CREATE INDEX IF NOT EXISTS idx_chats_updated_at ON chats(updated_at DESC);
-            CREATE INDEX IF NOT EXISTS idx_chats_title      ON chats(title);
-            """
-        )
-        conn.commit()
-    finally:
-        conn.close()
+def _ensure_dirs():
+    """Data directories create karo agar exist nahi karte."""
+    os.makedirs(CHATS_DIR, exist_ok=True)
 
 
-_init_db()
+def _now():
+    """Current timestamp ISO format me."""
+    return datetime.now().isoformat(timespec="seconds")
+
+
+def _chat_file(chat_id):
+    """Chat file ka path return karo."""
+    return os.path.join(CHATS_DIR, f"{chat_id}.json")
+
+
+def _load_index():
+    """Index file load karo (saare chats ki metadata)."""
+    if os.path.exists(INDEX_FILE):
+        try:
+            with open(INDEX_FILE) as f:
+                return json.load(f)
+        except (json.JSONDecodeError, IOError):
+            return {}
+    return {}
+
+
+def _save_index(index):
+    """Index file save karo."""
+    with open(INDEX_FILE, "w") as f:
+        json.dump(index, f, indent=2)
+
+
+def _load_chat(chat_id):
+    """Single chat file load karo."""
+    _ensure_dirs()
+    filepath = _chat_file(chat_id)
+    if os.path.exists(filepath):
+        try:
+            with open(filepath) as f:
+                return json.load(f)
+        except (json.JSONDecodeError, IOError):
+            return None
+    return None
+
+
+def _save_chat(chat_data):
+    """Single chat file save karo."""
+    _ensure_dirs()
+    filepath = _chat_file(chat_data["id"])
+    with open(filepath, "w") as f:
+        json.dump(chat_data, f, indent=2)
+
+
+def _update_index(chat_id, title=None, updated_at=None, pinned=None):
+    """Index me chat metadata update karo."""
+    with _LOCK:
+        index = _load_index()
+        if chat_id not in index:
+            return
+        if title is not None:
+            index[chat_id]["title"] = title
+        if updated_at is not None:
+            index[chat_id]["updated_at"] = updated_at
+        if pinned is not None:
+            index[chat_id]["pinned"] = pinned
+        _save_index(index)
 
 
 # ─── Chat CRUD ────────────────────────────────────────────────────────────
 
 def create_chat(chat_id=None, title="New Chat"):
-    """Naya chat record banao (empty message list)."""
-    import uuid
-    from datetime import datetime
-
+    """Naya chat banao (empty message list)."""
+    _ensure_dirs()
     chat_id = chat_id or uuid.uuid4().hex
-    now = datetime.now().isoformat(timespec="seconds")
+    now = _now()
+
+    chat_data = {
+        "id": chat_id,
+        "title": title,
+        "created_at": now,
+        "updated_at": now,
+        "pinned": False,
+        "messages": []
+    }
+
     with _LOCK:
-        conn = _connect()
-        try:
-            conn.execute(
-                "INSERT OR IGNORE INTO chats (id, title, created_at, updated_at, pinned) "
-                "VALUES (?, ?, ?, ?, 0)",
-                (chat_id, title, now, now),
-            )
-            conn.commit()
-        finally:
-            conn.close()
+        _save_chat(chat_data)
+        index = _load_index()
+        index[chat_id] = {
+            "id": chat_id,
+            "title": title,
+            "created_at": now,
+            "updated_at": now,
+            "pinned": False
+        }
+        _save_index(index)
+
     return chat_id
 
 
 def list_chats(search=None):
     """Saare chats latest activity order me (pinned pehle), search optional."""
     with _LOCK:
-        conn = _connect()
-        try:
-            sql = (
-                "SELECT c.id, c.title, c.created_at, c.updated_at, c.pinned, "
-                "       (SELECT COUNT(*) FROM messages m WHERE m.chat_id = c.id) AS message_count "
-                "FROM chats c "
-            )
-            params = []
-            if search:
-                sql += "WHERE c.title LIKE ? ESCAPE '\\' COLLATE NOCASE "
-                params.append("%" + _escape_like(search) + "%")
-            sql += (
-                "ORDER BY c.pinned DESC, c.updated_at DESC "
-            )
-            rows = conn.execute(sql, params).fetchall()
-        finally:
-            conn.close()
+        index = _load_index()
 
+    chats = list(index.values())
+
+    # Search filter
+    if search:
+        search_lower = search.lower()
+        chats = [c for c in chats if search_lower in c["title"].lower()]
+
+    # Sort: pinned pehle (True > False), phir updated_at descending
+    chats.sort(key=lambda c: (c["pinned"], c["updated_at"]), reverse=True)
+
+    # Group by date
     grouped = {"Pinned": [], "Today": [], "Yesterday": [], "Older": []}
-    for r in rows:
-        chat = dict(r)
-        chat["pinned"] = bool(chat["pinned"])
-        if chat["pinned"]:
-            chat["group"] = "Pinned"
-            grouped["Pinned"].append(chat)
+    for chat in chats:
+        chat_copy = dict(chat)
+        chat_copy["pinned"] = bool(chat_copy["pinned"])
+        chat_copy["message_count"] = _get_message_count(chat_copy["id"])
+        if chat_copy["pinned"]:
+            chat_copy["group"] = "Pinned"
+            grouped["Pinned"].append(chat_copy)
         else:
-            chat["group"] = _date_group(chat["updated_at"])
-            grouped[chat["group"]].append(chat)
+            chat_copy["group"] = _date_group(chat_copy["updated_at"])
+            grouped[chat_copy["group"]].append(chat_copy)
+
     return grouped
 
 
-def _escape_like(s):
-    return s.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+def _get_message_count(chat_id):
+    """Chat ke messages ki count return karo."""
+    chat = _load_chat(chat_id)
+    if chat:
+        return len(chat.get("messages", []))
+    return 0
 
 
 def _date_group(iso_ts):
     """ISO timestamp ko Today / Yesterday / Older group me daalo."""
-    from datetime import datetime, timedelta
-
     try:
         dt = datetime.fromisoformat(iso_ts)
     except (TypeError, ValueError):
@@ -142,133 +188,125 @@ def _date_group(iso_ts):
 
 def get_chat(chat_id):
     """Single chat metadata (ya None)."""
-    with _LOCK:
-        conn = _connect()
-        try:
-            row = conn.execute(
-                "SELECT id, title, created_at, updated_at, pinned FROM chats WHERE id = ?",
-                (chat_id,),
-            ).fetchone()
-        finally:
-            conn.close()
-    if not row:
+    chat = _load_chat(chat_id)
+    if not chat:
         return None
-    chat = dict(row)
-    chat["pinned"] = bool(chat["pinned"])
-    return chat
+    return {
+        "id": chat["id"],
+        "title": chat["title"],
+        "created_at": chat["created_at"],
+        "updated_at": chat["updated_at"],
+        "pinned": bool(chat["pinned"])
+    }
 
 
 def rename_chat(chat_id, title):
+    """Chat ka title rename karo."""
     with _LOCK:
-        conn = _connect()
-        try:
-            cur = conn.execute(
-                "UPDATE chats SET title = ? WHERE id = ?", (title, chat_id)
-            )
-            conn.commit()
-            ok = cur.rowcount > 0
-        finally:
-            conn.close()
-    return ok
+        chat = _load_chat(chat_id)
+        if not chat:
+            return False
+        chat["title"] = title
+        chat["updated_at"] = _now()
+        _save_chat(chat)
+        _update_index(chat_id, title=title, updated_at=chat["updated_at"])
+    return True
 
 
 def set_pinned(chat_id, pinned):
+    """Chat ko pinned/unpinned karo."""
     with _LOCK:
-        conn = _connect()
-        try:
-            cur = conn.execute(
-                "UPDATE chats SET pinned = ? WHERE id = ?", (1 if pinned else 0, chat_id)
-            )
-            conn.commit()
-            ok = cur.rowcount > 0
-        finally:
-            conn.close()
-    return ok
+        chat = _load_chat(chat_id)
+        if not chat:
+            return False
+        chat["pinned"] = bool(pinned)
+        chat["updated_at"] = _now()
+        _save_chat(chat)
+        _update_index(chat_id, updated_at=chat["updated_at"], pinned=bool(pinned))
+    return True
 
 
 def delete_chat(chat_id):
-    """Chat + uske messages delete (messages FK ON DELETE CASCADE)."""
+    """Chat file + index entry delete karo."""
     with _LOCK:
-        conn = _connect()
-        try:
-            cur = conn.execute("DELETE FROM chats WHERE id = ?", (chat_id,))
-            conn.commit()
-            ok = cur.rowcount > 0
-        finally:
-            conn.close()
-    return ok
+        filepath = _chat_file(chat_id)
+        if os.path.exists(filepath):
+            os.remove(filepath)
+        index = _load_index()
+        if chat_id in index:
+            del index[chat_id]
+            _save_index(index)
+            return True
+    return False
 
 
 # ─── Message persistence ─────────────────────────────────────────────────
 
 def add_message(chat_id, role, content):
     """
-    Ek message INSERT karo (incremental — poori history kabhi overwrite nahi hoti).
-    chats.updated_at bhi bump hota hai.
+    Chat file me message append karo.
     Returns (message_id, timestamp).
     """
     from datetime import datetime
 
-    now = datetime.now().isoformat(timespec="seconds")
+    now = _now()
     with _LOCK:
-        conn = _connect()
-        try:
-            cur = conn.execute(
-                "INSERT INTO messages (chat_id, role, content, timestamp) VALUES (?, ?, ?, ?)",
-                (chat_id, role, content, now),
-            )
-            conn.execute(
-                "UPDATE chats SET updated_at = ? WHERE id = ?", (now, chat_id)
-            )
-            conn.commit()
-            msg_id = cur.lastrowid
-        finally:
-            conn.close()
+        chat = _load_chat(chat_id)
+        if not chat:
+            return None, None
+
+        # Message ID: last message ka ID + 1 (ya 1 agar pehla message)
+        messages = chat.get("messages", [])
+        msg_id = len(messages) + 1
+
+        message = {
+            "id": msg_id,
+            "role": role,
+            "content": content,
+            "timestamp": now
+        }
+        messages.append(message)
+        chat["messages"] = messages
+        chat["updated_at"] = now
+        _save_chat(chat)
+        _update_index(chat_id, updated_at=now)
+
     return msg_id, now
 
 
 def set_title_if_new(chat_id, title):
     """Title sirf tab set karo jab chat abhi bhi default 'New Chat' ho (auto-title)."""
     with _LOCK:
-        conn = _connect()
-        try:
-            cur = conn.execute(
-                "UPDATE chats SET title = ? WHERE id = ? AND title = 'New Chat'",
-                (title, chat_id),
-            )
-            conn.commit()
-            ok = cur.rowcount > 0
-        finally:
-            conn.close()
-    return ok
+        chat = _load_chat(chat_id)
+        if not chat:
+            return False
+        if chat["title"] == "New Chat":
+            chat["title"] = title
+            chat["updated_at"] = _now()
+            _save_chat(chat)
+            _update_index(chat_id, title=title, updated_at=chat["updated_at"])
+            return True
+    return False
 
 
 def get_messages(chat_id):
     """Chat ke saare messages, ordered by id (insertion order = conversation order)."""
-    with _LOCK:
-        conn = _connect()
-        try:
-            rows = conn.execute(
-                "SELECT id, role, content, timestamp FROM messages WHERE chat_id = ? ORDER BY id ASC",
-                (chat_id,),
-            ).fetchall()
-        finally:
-            conn.close()
-    return [dict(r) for r in rows]
+    chat = _load_chat(chat_id)
+    if not chat:
+        return []
+    return chat.get("messages", [])
 
 
 def touch_chat(chat_id):
-    from datetime import datetime
-    now = datetime.now().isoformat(timespec="seconds")
+    """Chat ka updated_at refresh karo."""
+    now = _now()
     with _LOCK:
-        conn = _connect()
-        try:
-            conn.execute(
-                "UPDATE chats SET updated_at = ? WHERE id = ?", (now, chat_id)
-            )
-            conn.commit()
-        finally:
-            conn.close()
+        chat = _load_chat(chat_id)
+        if not chat:
+            return
+        chat["updated_at"] = now
+        _save_chat(chat)
+        _update_index(chat_id, updated_at=now)
 
 
 # ─── Auto titles ─────────────────────────────────────────────────────────
