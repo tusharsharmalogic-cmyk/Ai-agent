@@ -500,38 +500,71 @@ body {
 }
 @keyframes blink { 50% { opacity: 0; } }
 
-/* ─── Command Card ─── */
+/* ─── Command Card (Terminal Style) ─── */
 .cmd-card {
-  background: var(--surface);
-  border: 1px solid var(--border);
+  background: #1a1a1a;
+  border: 1px solid #333;
   border-radius: var(--radius);
   overflow: hidden;
-  margin: 4px 0;
-  max-width: min(86%, 580px);
+  margin: 8px 0;
+  max-width: min(92%, 680px);
+  font-family: var(--mono);
+  box-shadow: 0 2px 12px rgba(0,0,0,0.4);
 }
-
 .cmd-head {
-  display: flex; align-items: center; gap: 8px;
-  font-family: var(--mono);
-  font-size: 12.5px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
   padding: 8px 12px;
-  border-bottom: 1px solid var(--border);
-  color: var(--text-secondary);
+  background: #252525;
+  border-bottom: 1px solid #333;
 }
-.cmd-head span { font-size: 11px; }
-.cmd-head code { color: var(--text); background: none; border: none; padding: 0; word-break: break-all; }
-
+.cmd-dots { display: flex; gap: 5px; margin-right: 4px; }
+.cmd-dots span { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+.cmd-dots span:nth-child(1) { background: #ff5f57; }
+.cmd-dots span:nth-child(2) { background: #febc2e; }
+.cmd-dots span:nth-child(3) { background: #28c840; }
+.cmd-label { font-size: 11px; color: #666; flex: 1; text-align: center; margin-right: 60px; }
+.cmd-prompt-line {
+  display: flex; align-items: center; gap: 8px;
+  padding: 10px 14px 6px;
+  border-bottom: 1px solid #2a2a2a;
+}
+.cmd-prompt-sign { color: #28c840; font-size: 13px; font-weight: bold; user-select: none; }
+.cmd-prompt-text { color: #e0e0e0; font-size: 12.5px; word-break: break-all; flex: 1; }
+.cmd-copy-btn {
+  background: none; border: 1px solid #444; color: #888;
+  font-size: 10px; padding: 2px 8px; border-radius: 4px;
+  cursor: pointer; font-family: var(--font); transition: all 0.15s;
+}
+.cmd-copy-btn:hover { background: #333; color: #ccc; border-color: #666; }
+.cmd-copy-btn.copied { color: #28c840; border-color: #28c840; }
 .cmd-out {
-  font-family: var(--mono);
-  font-size: 12.5px;
-  line-height: 1.5;
-  padding: 10px 12px;
-  max-height: 220px;
-  overflow: auto;
-  white-space: pre-wrap;
-  word-break: break-word;
-  color: var(--text-secondary);
+  font-family: var(--mono); font-size: 12px; line-height: 1.6;
+  padding: 10px 14px 12px; max-height: 260px; overflow: auto;
+  white-space: pre-wrap; word-break: break-word;
+  color: #a8b4c0; background: #1a1a1a;
 }
+.cmd-out .out-line { display: block; }
+.cmd-out .out-line.err-line { color: #ff6b6b; }
+.cmd-out .out-line.ok-line { color: #28c840; }
+.cmd-running {
+  display: flex; align-items: center; gap: 8px;
+  padding: 10px 14px; color: #febc2e; font-size: 12px;
+}
+.cmd-spinner {
+  width: 12px; height: 12px; border: 2px solid #444;
+  border-top-color: #febc2e; border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+.cmd-status-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 5px 14px; background: #1f1f1f;
+  border-top: 1px solid #2a2a2a; font-size: 10.5px; color: #555;
+}
+.cmd-status-bar .exit-ok { color: #28c840; }
+.cmd-status-bar .exit-err { color: #ff5f57; }
 
 /* ─── Error msg ─── */
 .msg.err {

@@ -73,9 +73,29 @@ function addAiMsg() {
 function addCmdCard(cmd, output) {
   const el = document.createElement("div");
   el.className = "cmd-card";
+  // Color output lines
+  const coloredOut = esc(output).split("\n").map(line => {
+    if (/error|Error|ERROR|failed|FAILED|not found/i.test(line))
+      return `<span class="out-line err-line">${line}</span>`;
+    if (/done|success|ok|created|installed/i.test(line))
+      return `<span class="out-line ok-line">${line}</span>`;
+    return `<span class="out-line">${line}</span>`;
+  }).join("\n");
   el.innerHTML =
-    `<div class="cmd-head"><span>⚡</span> <code>${esc(cmd)}</code></div>` +
-    `<pre class="cmd-out">${esc(output)}</pre>`;
+    `<div class="cmd-head">`+
+    `<div class="cmd-dots"><span></span><span></span><span></span></div>`+
+    `<span class="cmd-label">bash</span>`+
+    `</div>`+
+    `<div class="cmd-prompt-line">`+
+    `<span class="cmd-prompt-sign">$</span>`+
+    `<span class="cmd-prompt-text">${esc(cmd)}</span>`+
+    `<button class="cmd-copy-btn" onclick="(function(b){navigator.clipboard.writeText(${JSON.stringify(cmd)}).then(()=>{b.textContent=\Copied!\;b.classList.add(\copied\);setTimeout(()=>{b.textContent=\Copy\;b.classList.remove(\copied\)},1500)});})(this)">Copy</button>`+
+    `</div>`+
+    `<pre class="cmd-out">${coloredOut}</pre>`+
+    `<div class="cmd-status-bar">`+
+    `<span>⚡ RUN_CMD executed</span>`+
+    `<span class="exit-ok">✔ done</span>`+
+    `</div>`;
   chat.appendChild(el);
   scrollDown();
 }
